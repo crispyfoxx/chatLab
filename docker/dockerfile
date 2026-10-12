@@ -1,0 +1,32 @@
+FROM m.daocloud.io/docker.io/library/debian:13
+
+# Debian 官方基础镜像可能尚未安装 CA 证书。
+# 先使用清华 TUNA 的 HTTP 源安装 ca-certificates，
+# 然后切换回 HTTPS。
+RUN sed -i \
+        -e 's|http://deb.debian.org/debian-security|http://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+        -e 's|http://deb.debian.org/debian|http://mirrors.tuna.tsinghua.edu.cn/debian|g' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && sed -i \
+        's|http://mirrors.tuna.tsinghua.edu.cn|https://mirrors.tuna.tsinghua.edu.cn|g' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        clang \
+        cmake \
+        ninja-build \
+        gdb \
+        valgrind \
+        libssl-dev \
+        nlohmann-json3-dev \
+        tcpdump \
+        iproute2 \
+        netcat-openbsd \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+CMD ["sleep", "infinity"]
