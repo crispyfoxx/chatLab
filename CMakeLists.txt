@@ -27,27 +27,64 @@ endif()
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(nlohmann_json REQUIRED)      # 来自 apt 的 nlohmann-json3-dev
+find_package(ZLIB REQUIRED)
 
+
+# ==================================================
+# 公共代码
+# protocol / socket_io 等
+# ==================================================
 add_library(chat_core #创建一个叫chatcore的库，把common里的东西单独编译
   common/net.cpp
   common/protocol.cpp
+  client/client.cpp
 )
-target_include_directories(chat_core PUBLIC
+target_include_directories(chat_core PUBLIC # 头文件可以从当前项目根目录开始查找。允许如 #include "common/protocol.cpp"
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_link_libraries(chat_core PUBLIC
   Threads::Threads
   OpenSSL::Crypto
   nlohmann_json::nlohmann_json
+  ZLIB::ZLIB
 )
 
-add_executable(chat_server server/main.cpp)
+# ==================================================
+# Server
+# ==================================================
+add_executable(chat_server
+  server/server.h
+  server/server.cpp
+  server/main.cpp)
+
 target_link_libraries(chat_server PRIVATE chat_core)
 
-add_executable(chat_client client/main.cpp)
+
+# ==================================================
+# Client
+# ==================================================
+add_executable(chat_client
+  client/client.h
+  client/client.cpp
+  client/main.cpp)
+
 target_link_libraries(chat_client PRIVATE chat_core)
 
+
+# ==================================================
+# Tests
+# ==================================================
 enable_testing()
-add_executable(protocol_test tests/protocol_test.cpp)
-target_link_libraries(protocol_test PRIVATE chat_core)
-add_test(NAME protocol_test COMMAND protocol_test)
+add_executable(login_test 
+  tests/login_test.cpp
+)
+
+target_link_libraries(login_test PRIVATE chat_core)
+
+add_test(NAME login_test COMMAND login_test)
+
+
+# 重新配置 CMake
+#cmake -S . -B build
+# 重新编译
+#cmake --build build
