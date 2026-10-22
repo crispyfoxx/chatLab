@@ -77,3 +77,47 @@ Frame Client::makeLoginRequest() {
 
     return frame;
 }
+
+void Client::Start(const std::string& host, const std::string& port) {
+    sockfd_ = ConnectToServer(host, port);
+    if (sockfd_ < 0) {
+        std::cerr << "Unable to connect to " << host << ":" << port << '\n';
+        return;
+    }
+    std::cout << "Connected to " << host << ":" << port << std::endl;
+
+    // 发送登录信息
+    Frame frame = makeLoginRequest();
+    send_frame(sockfd_, frame);
+
+    while (true) {
+        Frame frame;
+        auto result = recv_frame(sockfd_, &frame);
+        if (result == ParseStatus::Ok) {
+            std::string text(frame.payload.begin(), frame.payload.end());
+            std::cout << "receive message from host " << host << ":" << port << std::endl;
+
+            // std::cout << "magic = " << frame.header.magic << "\n";
+            // std::cout << "version = " << static_cast<int>(frame.header.version) << "\n";
+            // std::cout << "type = " << static_cast<int>(frame.header.type) << "\n";
+            // std::cout << "flags = " << frame.header.flags << "\n";
+            // std::cout << "payload_len = " << frame.header.payload_len << "\n";
+            // std::cout << "request_id = " << frame.header.request_id << "\n";
+            // std::cout << "checksum = " << frame.header.checksum << "\n";
+
+            std::cout << "payload = " << text << "\n";
+
+            if (frame.header.type == LOGIN_RESP) {
+                std::cout << "Login successful!" << std::endl;
+            }
+        } else if (result == ParseStatus::PeerClosed) {
+            std::cout << "Lost connection to host " << std::endl;
+            break;
+        } else {
+            continue;
+        }
+    }
+
+    close(sockfd_);
+    return;
+}

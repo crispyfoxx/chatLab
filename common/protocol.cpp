@@ -169,7 +169,7 @@ DecodeHeaderStatus decode_header(const uint8_t* data, FrameHeader* header) {
 ParseStatus recv_frame(int fd, Frame* frame) {  // 从 TCP 字节流里面完整读出一整条 Frame
     std::array<uint8_t, HEADER_LEN> header_buffer;
     if (recv_exact(fd, header_buffer.data(), HEADER_LEN) == false) {
-        return ParseStatus::SocketError;
+        return ParseStatus::PeerClosed;
     }
 
     FrameHeader header;  //    InvalidMagic = 1,UnsupportedVersion = 2,PayloadTooLarge = 3, PayloadEmpty = 4,

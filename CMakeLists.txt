@@ -53,6 +53,8 @@ target_link_libraries(chat_core PUBLIC
 # Server
 # ==================================================
 add_executable(chat_server
+  server/session_manager.h
+  server/session_manager.cpp
   server/server.h
   server/server.cpp
   server/main.cpp)
@@ -75,13 +77,13 @@ target_link_libraries(chat_client PRIVATE chat_core)
 # Tests
 # ==================================================
 enable_testing()
-add_executable(login_test 
-  tests/login_test.cpp
+add_executable(basic_multithread 
+  tests/basic_multithread.cpp
 )
 
-target_link_libraries(login_test PRIVATE chat_core)
+target_link_libraries(basic_multithread PRIVATE chat_core)
 
-add_test(NAME login_test COMMAND login_test)
+add_test(NAME basic_multithread COMMAND basic_multithread)
 
 
 # 重新配置 CMake

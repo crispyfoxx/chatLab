@@ -8,9 +8,9 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
-#include <set>
 
 #include "common/protocol.h"
+#include "session_manager.h"
 
 constexpr int OneMiB = 1024 * 1024;
 
@@ -30,12 +30,13 @@ class Server {
 
     void sendError(int fd, uint32_t request_id, std::string_view error_code,
                    std::string_view error_message);  // 出现错误时返给客户端的错误信息
-    void handleLogin(const Frame& frame);
+    void handleLogin(const Frame& frame, std::shared_ptr<Session> session);
     void sendLoginSuccess(int fd, uint32_t request_id);
+    void handleClient(std::shared_ptr<Session> session); // 接入新用户时，创建新线程处理
 
    private:
     uint16_t port_;
     int sockfd_;
 
-    std::set<std::string> online_list_;
+    SessionManager session_manager_;
 };

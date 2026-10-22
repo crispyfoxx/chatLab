@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <thread>
 
 #include "common/protocol.h"
 
@@ -50,42 +51,54 @@ void Server::Start() {
         int client_sockfd = accept(sockfd_, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
         if (client_sockfd < 0) {
             std::perror("accept error");
-            return;
+            continue;
         }
+
+        auto session = std::make_shared<Session>(client_sockfd);
+        std::thread(&Server::handleClient, this, session).detach();
+        // this 总是指向调用这个函数的那个对象
+
         char ip[INET_ADDRSTRLEN]{};
         inet_ntop(AF_INET, &client_addr.sin_addr, ip, sizeof(ip));  // netwotk byte order -> presentation format
         std::cout << "Accepted connection from " << ip << ":" << ntohs(client_addr.sin_port) << std::endl;
-
-        while (true) {
-            Frame frame;
-            auto result = recv_frame(client_sockfd, &frame);
-            if (result == ParseStatus::Ok) {
-                std::string text(frame.payload.begin(), frame.payload.end());
-                std::cout << "receive message from " << ip << ":" << ntohs(client_addr.sin_port) << std::endl;
-
-                // std::cout << "magic = " << frame.header.magic << "\n";
-                // std::cout << "version = " << static_cast<int>(frame.header.version) << "\n";
-                // std::cout << "type = " << static_cast<int>(frame.header.type) << "\n";
-                // std::cout << "flags = " << frame.header.flags << "\n";
-                // std::cout << "payload_len = " << frame.header.payload_len << "\n";
-                // std::cout << "request_id = " << frame.header.request_id << "\n";
-                // std::cout << "checksum = " << frame.header.checksum << "\n";
-
-                std::cout << "payload = " << text << "\n";
-
-                if (frame.header.type == LOGIN_REQ) {
-                    handleLogin(frame);
-                }
-            } else {
-                continue;
-            }
-        }
-
-        close(client_sockfd);
     }
 }
 
-void Server::handleLogin(const Frame& frame) {
+void Server::handleClient(std::shared_ptr<Session> session) {
+    while (true) {
+        Frame frame;
+        auto result = recv_frame(session->get_fd(), &frame);
+        if (result == ParseStatus::Ok) {
+            std::string text(frame.payload.begin(), frame.payload.end());
+            std::cout << "receive message from " << session->get_username() << std::endl;
+
+            // std::cout << "magic = " << frame.header.magic << "\n";
+            // std::cout << "version = " << static_cast<int>(frame.header.version) << "\n";
+            // std::cout << "type = " << static_cast<int>(frame.header.type) << "\n";
+            // std::cout << "flags = " << frame.header.flags << "\n";
+            // std::cout << "payload_len = " << frame.header.payload_len << "\n";
+            // std::cout << "request_id = " << frame.header.request_id << "\n";
+            // std::cout << "checksum = " << frame.header.checksum << "\n";
+
+            std::cout << "payload = " << text << "\n";
+
+            if (frame.header.type == LOGIN_REQ) {
+                handleLogin(frame, session);
+            }
+        } else if (result == ParseStatus::PeerClosed) {
+            std::cout << "Client disconnected: " << session->get_username() << std::endl;
+            session_manager_.remove(session->get_username());
+            break;
+        } else {
+            continue;
+        }
+    }
+
+    close(session->get_fd());
+    return;
+}
+
+void Server::handleLogin(const Frame& frame, std::shared_ptr<Session> session) {
     std::string text(frame.payload.begin(), frame.payload.end());
 
     nlohmann::json j;
@@ -93,12 +106,12 @@ void Server::handleLogin(const Frame& frame) {
     try {
         j = nlohmann::json::parse(text);
     } catch (...) {
-        sendError(sockfd_, frame.header.request_id, "MALFORMED_PAYLOAD", "invalid JSON");
+        sendError(session->get_fd(), frame.header.request_id, "MALFORMED_PAYLOAD", "invalid JSON");
         return;
     }
 
     if (!j.contains("username") || !j["username"].is_string()) {
-        sendError(sockfd_, frame.header.request_id, "INVALID_PAYLOAD", "username is required");
+        sendError(session->get_fd(), frame.header.request_id, "INVALID_PAYLOAD", "username is required");
 
         return;
     }
@@ -106,15 +119,24 @@ void Server::handleLogin(const Frame& frame) {
     std::string username = j["username"].get<std::string>();
 
     if (username.empty()) {
-        sendError(sockfd_, frame.header.request_id, "INVALID_USERNAME", "username cannot be empty");
+        sendError(session->get_fd(), frame.header.request_id, "INVALID_USERNAME", "username cannot be empty");
+
+        return;
+    }
+
+    if (session_manager_.find(username) != nullptr) {
+        std::cout << "User already exists: " << username << std::endl;
+        sendError(session->get_fd(), frame.header.request_id, "USER_EXISTS", "username already exists");
 
         return;
     }
 
     std::cout << "Login request success for user: " << username << std::endl;
-    online_list_.insert(username);
+    session->set_username(username);
+    session->set_logged_in(true);
+    session_manager_.add(username, session);
     // 暂时认为登录成功
-    sendLoginSuccess(sockfd_, frame.header.request_id);
+    sendLoginSuccess(session->get_fd(), frame.header.request_id);
 }
 
 void Server::sendError(int fd, uint32_t request_id, std::string_view error_code, std::string_view error_message) {

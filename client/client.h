@@ -20,8 +20,9 @@ class Client {
 
     int ConnectToServer(const std::string& host, const std::string& port);
     void Disconnect();
-
     Frame makeLoginRequest();
+
+    void Start(const std::string& host, const std::string& port);
 
    private:
     std::string username_;
