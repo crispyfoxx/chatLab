@@ -1,6 +1,10 @@
 #include "protocol.h"
 
+#include <array>
+#include <iomanip>
 #include <iostream>
+#include <stdexcept>
+
 bool isValidLen(uint32_t len) { return len > 0 && len <= MAX_PAYLOAD_SIZE; }
 
 uint32_t calculateCRC32(const uint8_t* data, size_t len) { return crc32(0L, data, len); }
@@ -196,4 +200,9 @@ ParseStatus recv_frame(int fd, Frame* frame) {  // 从 TCP 字节流里面完整
     }
 
     return ParseStatus::Ok;
+}
+
+void PrintPayload(Frame frame) {
+    std::string text(frame.payload.begin(), frame.payload.end());
+    std::cout << text << std::endl;
 }

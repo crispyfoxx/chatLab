@@ -36,6 +36,28 @@ bool Server::Init() {
         return false;
     }
 
+    // 注册handlers
+    // 登录处理
+    dispatcher_.register_handler(MessageType::LOGIN_REQ, [this](std::shared_ptr<Session> session, const Frame& frame) {
+        handleLogin(session, frame);
+    });
+    // lambda 理解成一个“适配器”：把 Server 的成员函数包装成 Dispatcher 想要的普通 Handler 形式
+
+    // 获取Userlist处理
+    dispatcher_.register_handler(
+        MessageType::USER_LIST_REQ,
+        [this](std::shared_ptr<Session> session, const Frame& frame) { handleUserlist(session, frame); });
+
+    // 私聊消息处理
+    dispatcher_.register_handler(
+        MessageType::PRIVATE_REQ,
+        [this](std::shared_ptr<Session> session, const Frame& frame) { handlePrivate(session, frame); });
+
+    // 广播消息处理
+    dispatcher_.register_handler(
+        MessageType::BROADCAST_REQ,
+        [this](std::shared_ptr<Session> session, const Frame& frame) { handleBroadcast(session, frame); });
+
     return true;
 }
 
@@ -82,9 +104,8 @@ void Server::handleClient(std::shared_ptr<Session> session) {
 
             std::cout << "payload = " << text << "\n";
 
-            if (frame.header.type == LOGIN_REQ) {
-                handleLogin(frame, session);
-            }
+            // dispatcher根据帧头的type调用相应的handler
+            dispatcher_.dispatch(session, frame);
         } else if (result == ParseStatus::PeerClosed) {
             std::cout << "Client disconnected: " << session->get_username() << std::endl;
             session_manager_.remove(session->get_username());
@@ -98,7 +119,7 @@ void Server::handleClient(std::shared_ptr<Session> session) {
     return;
 }
 
-void Server::handleLogin(const Frame& frame, std::shared_ptr<Session> session) {
+void Server::handleLogin(std::shared_ptr<Session> session, const Frame& frame) {
     std::string text(frame.payload.begin(), frame.payload.end());
 
     nlohmann::json j;
@@ -106,12 +127,12 @@ void Server::handleLogin(const Frame& frame, std::shared_ptr<Session> session) {
     try {
         j = nlohmann::json::parse(text);
     } catch (...) {
-        sendError(session->get_fd(), frame.header.request_id, "MALFORMED_PAYLOAD", "invalid JSON");
+        sendError(session, frame.header.request_id, "MALFORMED_PAYLOAD", "invalid JSON");
         return;
     }
 
     if (!j.contains("username") || !j["username"].is_string()) {
-        sendError(session->get_fd(), frame.header.request_id, "INVALID_PAYLOAD", "username is required");
+        sendError(session, frame.header.request_id, "INVALID_PAYLOAD", "username is required");
 
         return;
     }
@@ -119,14 +140,14 @@ void Server::handleLogin(const Frame& frame, std::shared_ptr<Session> session) {
     std::string username = j["username"].get<std::string>();
 
     if (username.empty()) {
-        sendError(session->get_fd(), frame.header.request_id, "INVALID_USERNAME", "username cannot be empty");
+        sendError(session, frame.header.request_id, "INVALID_USERNAME", "username cannot be empty");
 
         return;
     }
 
     if (session_manager_.find(username) != nullptr) {
         std::cout << "User already exists: " << username << std::endl;
-        sendError(session->get_fd(), frame.header.request_id, "USER_EXISTS", "username already exists");
+        sendError(session, frame.header.request_id, "USER_EXISTS", "username already exists");
 
         return;
     }
@@ -136,10 +157,11 @@ void Server::handleLogin(const Frame& frame, std::shared_ptr<Session> session) {
     session->set_logged_in(true);
     session_manager_.add(username, session);
     // 暂时认为登录成功
-    sendLoginSuccess(session->get_fd(), frame.header.request_id);
+    sendLoginSuccess(session, frame.header.request_id);
 }
 
-void Server::sendError(int fd, uint32_t request_id, std::string_view error_code, std::string_view error_message) {
+void Server::sendError(std::shared_ptr<Session> session, uint32_t request_id, std::string_view error_code,
+                       std::string_view error_message) {
     nlohmann::json j;
 
     j["code"] = error_code;
@@ -156,10 +178,10 @@ void Server::sendError(int fd, uint32_t request_id, std::string_view error_code,
     frame.payload.assign(text.begin(), text.end());
     frame.header.checksum = calculateCRC32(frame.payload.data(), frame.payload.size());
 
-    send_frame(fd, frame);
+    session->send(frame);
 }
 
-void Server::sendLoginSuccess(int fd, uint32_t request_id) {
+void Server::sendLoginSuccess(std::shared_ptr<Session> session, uint32_t request_id) {
     nlohmann::json j;
 
     j["code"] = "SUCCESS";
@@ -176,5 +198,143 @@ void Server::sendLoginSuccess(int fd, uint32_t request_id) {
     frame.payload.assign(text.begin(), text.end());
     frame.header.checksum = calculateCRC32(frame.payload.data(), frame.payload.size());
 
-    send_frame(fd, frame);
+    session->send(frame);
+}
+
+void Server::handleUserlist(std::shared_ptr<Session> session, const Frame& frame) {
+    // 没有什么要验证的，直接发送
+    std::vector<std::string> usernames = session_manager_.listUsernames();
+
+    nlohmann::json j;
+    j["code"] = "SUCCESS";
+    j["usernamelist"] = usernames;
+    std::string text = j.dump();
+
+    Frame frame_temp;
+    frame_temp.header.version = FRAME_VERSION;
+    frame_temp.header.type = static_cast<uint8_t>(MessageType::USER_LIST_RESP);
+    frame_temp.header.request_id = frame.header.request_id;
+    frame_temp.payload.assign(text.begin(), text.end());
+    frame_temp.header.checksum = calculateCRC32(frame_temp.payload.data(), frame_temp.payload.size());
+    session->send(frame_temp);
+}
+
+void Server::handlePrivate(std::shared_ptr<Session> session, const Frame& frame) {
+    std::string text(frame.payload.begin(), frame.payload.end());
+
+    nlohmann::json j;
+
+    try {
+        j = nlohmann::json::parse(text);
+    } catch (...) {
+        sendError(session, frame.header.request_id, "MALFORMED_PAYLOAD", "invalid JSON");
+        return;
+    }
+
+    if (!j.contains("to") || !j["to"].is_string()) {
+        sendError(session, frame.header.request_id, "INVALID_PAYLOAD", "to is required");
+        return;
+    }
+    if (!j.contains("message") || !j["message"].is_string()) {
+        sendError(session, frame.header.request_id, "INVALID_PAYLOAD", "message is required");
+        return;
+    }
+
+    std::string chat_target = j["to"].get<std::string>();
+    std::string message = j["message"].get<std::string>();
+
+    if (chat_target.empty()) {
+        sendError(session, frame.header.request_id, "INVALID_CHAT_TARGET", "chat target cannot be empty");
+        return;
+    }
+
+    auto target_session = session_manager_.find(chat_target);
+    if (!target_session) {
+        std::cout << "User not exists or not online: " << chat_target << std::endl;
+        sendError(session, frame.header.request_id, "USER_NOT_FOUND", "user not found or not online");
+        return;
+    }
+
+    std::cout << "Private message request for user: " << chat_target << std::endl;
+
+    // 转发消息至目标用户
+    sendPrivate(target_session, frame, session->get_username(), message);
+    // 确认发送成功消息
+    ConfirmSend(session, frame, MessageType::PRIVATE_RESP);
+}
+
+void Server::sendPrivate(std::shared_ptr<Session> target_session, const Frame& frame, const std::string& username,
+                         const std::string& message) {
+    nlohmann::json j;
+
+    j["from"] = username;
+    j["message"] = message;
+
+    std::string text = j.dump();
+
+    Frame frame_temp = frame;
+    frame_temp.header.type = MessageType::PRIVATE_MSG;
+    frame_temp.payload.assign(text.begin(), text.end());
+    frame_temp.header.checksum = calculateCRC32(frame_temp.payload.data(), frame_temp.payload.size());
+    target_session->send(frame_temp);
+}
+
+void Server::SendBroadcast(std::shared_ptr<Session> session, const Frame& frame, const std::string& username,
+                           const std::string& message) {
+    nlohmann::json j;
+
+    j["from"] = username;
+    j["message"] = message;
+
+    std::string text = j.dump();
+
+    Frame frame_temp = frame;
+    frame_temp.header.type = MessageType::BROADCAST_MSG;
+    frame_temp.payload.assign(text.begin(), text.end());
+    frame_temp.header.checksum = calculateCRC32(frame_temp.payload.data(), frame_temp.payload.size());
+
+    for (const auto& target_session : session_manager_.GetSessions()) {
+        if (target_session != session) {
+            target_session->send(frame_temp);
+        }
+    }
+}
+
+void Server::ConfirmSend(std::shared_ptr<Session> session, const Frame& frame, MessageType type) {
+    nlohmann::json j;
+
+    j["status"] = "success";
+
+    std::string text = j.dump();
+
+    Frame frame_temp = frame;
+    frame_temp.header.type = type;
+    frame_temp.payload.assign(text.begin(), text.end());
+    frame_temp.header.checksum = calculateCRC32(frame_temp.payload.data(), frame_temp.payload.size());
+    session->send(frame_temp);
+}
+
+void Server::handleBroadcast(std::shared_ptr<Session> session, const Frame& frame) {
+    std::string text(frame.payload.begin(), frame.payload.end());
+
+    nlohmann::json j;
+
+    try {
+        j = nlohmann::json::parse(text);
+    } catch (...) {
+        sendError(session, frame.header.request_id, "MALFORMED_PAYLOAD", "invalid JSON");
+        return;
+    }
+
+    if (!j.contains("message") || !j["message"].is_string()) {
+        sendError(session, frame.header.request_id, "INVALID_PAYLOAD", "message is required");
+        return;
+    }
+
+    std::string message = j["message"].get<std::string>();
+
+    // 群发
+    SendBroadcast(session, frame, session->get_username(), message);
+    // 确认发送成功消息
+    ConfirmSend(session, frame, MessageType::BROADCAST_RESP);
 }

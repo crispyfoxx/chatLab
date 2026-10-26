@@ -5,12 +5,9 @@
 #include <sys/types.h>
 #include <zlib.h>  // crc32
 
-#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
-#include <iomanip>
-#include <stdexcept>
 #include <vector>
 
 // +-------------------+
@@ -48,13 +45,16 @@ enum MessageType : uint8_t {
     LOGIN_REQ = 1,
     LOGIN_RESP = 2,
 
-    USER_LIST = 10,
+    USER_LIST_REQ = 10,
+    USER_LIST_RESP = 11,
 
-    BROADCAST_REQ = 20,
-    BROADCAST_MSG = 21,
+    BROADCAST_REQ = 20,   // 群发请求
+    BROADCAST_RESP = 21,  // 发送成功确认
+    BROADCAST_MSG = 22,   // 收到群发消息
 
     PRIVATE_REQ = 30,
-    PRIVATE_MSG = 31,
+    PRIVATE_RESP = 31,
+    PRIVATE_MSG = 32,
 
     ERROR_RESP = 40,
 
@@ -74,25 +74,19 @@ std::vector<uint8_t> encode_frame(const Frame& frame);  // 把c++中的Frame转�
 bool send_frame(int fd, const Frame& frame);
 
 enum class DecodeHeaderStatus {
-    Ok = 0,
-    InvalidMagic = 1,
-    UnsupportedVersion = 2,
-    PayloadTooLarge = 3,
-    PayloadEmpty = 4,
-    InvalidChecksum = 5,
-    UnknownType = 6
+    Ok,
+    InvalidMagic,
+    UnsupportedVersion,
+    PayloadTooLarge,
+    PayloadEmpty,
+    InvalidChecksum,
+    UnknownType
 };
 
 DecodeHeaderStatus decode_header(const uint8_t* data, FrameHeader* header);
 
-enum class ParseStatus {
-    Ok = 0,
-    PeerClosed = 1,
-    SocketError = 2,
-    InvalidMagic = 3,
-    UnsupportedVersion = 4,
-    FrameTooLarge = 5,
-    PayloadEmpty = 6
-};
+enum class ParseStatus { Ok, PeerClosed, SocketError, InvalidMagic, UnsupportedVersion, FrameTooLarge, PayloadEmpty };
 
 ParseStatus recv_frame(int fd, Frame* frame);  // 从 TCP 字节流里面完整读出一整条 Frame
+
+void PrintPayload(Frame frame);

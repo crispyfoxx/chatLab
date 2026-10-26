@@ -53,6 +53,8 @@ target_link_libraries(chat_core PUBLIC
 # Server
 # ==================================================
 add_executable(chat_server
+  server/dispatcher.h
+  server/dispatcher.cpp
   server/session_manager.h
   server/session_manager.cpp
   server/server.h

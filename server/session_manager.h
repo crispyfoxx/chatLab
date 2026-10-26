@@ -1,8 +1,11 @@
+#pragma once
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "common/protocol.h"
 
 class Session {
     // 核心目的封装fd和username，对每个用户的会话做管理
@@ -18,6 +21,8 @@ class Session {
     bool get_logged_in() const { return logged_in_; }
 
     void set_logged_in(bool value) { logged_in_ = value; }
+
+    void send(const Frame& frame);
 
    private:
     int fd_;
@@ -35,6 +40,8 @@ class SessionManager {
     std::shared_ptr<Session> find(const std::string& username);
 
     std::vector<std::string> listUsernames();
+
+    std::vector<std::shared_ptr<Session>> GetSessions();
 
    private:
     std::mutex mutex_;  // 全局在线用户表不能被多个线程同时增删查改导致数据竞争
